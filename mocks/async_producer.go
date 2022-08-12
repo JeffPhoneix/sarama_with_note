@@ -37,10 +37,11 @@ func NewAsyncProducer(t ErrorReporter, config *sarama.Config) *AsyncProducer {
 		t:            t,
 		closed:       make(chan struct{}),
 		expectations: make([]*producerExpectation, 0),
-		input:        make(chan *sarama.ProducerMessage, config.ChannelBufferSize),
-		successes:    make(chan *sarama.ProducerMessage, config.ChannelBufferSize),
-		errors:       make(chan *sarama.ProducerError, config.ChannelBufferSize),
-		TopicConfig:  NewTopicConfig(),
+		// 所有这些chan的大小都是 通过这个 配置来指定的
+		input:       make(chan *sarama.ProducerMessage, config.ChannelBufferSize),
+		successes:   make(chan *sarama.ProducerMessage, config.ChannelBufferSize),
+		errors:      make(chan *sarama.ProducerError, config.ChannelBufferSize),
+		TopicConfig: NewTopicConfig(),
 	}
 
 	go func() {

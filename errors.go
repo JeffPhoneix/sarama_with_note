@@ -152,17 +152,19 @@ type KError int16
 
 // Numeric error codes returned by the Kafka server.
 const (
-	ErrNoError                            KError = 0
-	ErrUnknown                            KError = -1
-	ErrOffsetOutOfRange                   KError = 1
-	ErrInvalidMessage                     KError = 2
-	ErrUnknownTopicOrPartition            KError = 3
-	ErrInvalidMessageSize                 KError = 4
-	ErrLeaderNotAvailable                 KError = 5
-	ErrNotLeaderForPartition              KError = 6
-	ErrRequestTimedOut                    KError = 7
-	ErrBrokerNotAvailable                 KError = 8
-	ErrReplicaNotAvailable                KError = 9
+	ErrNoError                 KError = 0
+	ErrUnknown                 KError = -1
+	ErrOffsetOutOfRange        KError = 1
+	ErrInvalidMessage          KError = 2
+	ErrUnknownTopicOrPartition KError = 3
+	ErrInvalidMessageSize      KError = 4
+	// leader不可用
+	ErrLeaderNotAvailable    KError = 5
+	ErrNotLeaderForPartition KError = 6
+	ErrRequestTimedOut       KError = 7
+	ErrBrokerNotAvailable    KError = 8
+	ErrReplicaNotAvailable   KError = 9
+	// 消息太大了原来是从这里搞出来的 实际上 就是一个本地配置呢
 	ErrMessageSizeTooLarge                KError = 10
 	ErrStaleControllerEpochCode           KError = 11
 	ErrOffsetMetadataTooLarge             KError = 12

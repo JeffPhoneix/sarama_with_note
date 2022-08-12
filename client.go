@@ -8,19 +8,35 @@ import (
 	"time"
 )
 
+// 不过有问题的是  如果多个producer 共用了这个 client  这种方式是否可行呢
+//
+
 // Client is a generic Kafka client. It manages connections to one or more Kafka brokers.
 // You MUST call Close() on a client to avoid leaks, it will not be garbage-collected
 // automatically when it passes out of scope. It is safe to share a client amongst many
 // users, however Kafka will process requests from a single client strictly in serial,
 // so it is generally more efficient to use the default one client per producer/consumer.
+// Client又是一个接口
+// 通用的 Kafka client。 管理到一个或者多个Kafka brokers的连接。
+// 必须在对一个client调用Close() 以避免泄露，当其传递出作用域的时候，它是不会被自动GC的。
+// 在多个用户之间共享同一个Client是安全的，但是Kafka会严格按照顺序来处理从一个client发送来的请求
+// 因此，通常更高效的做法是使用每个Producer/Consumer一个Client实例。
+// 是否可以直接通过共享 Client来实现这个东西呢  也就是说实际上  真正复用的就是这个 连接对象而已就行了呢。
+// 这样一来实际上你 根本不需要去做上层的什么管理 而是直接复用底层的连接就行了呢？
 type Client interface {
 	// Config returns the Config struct of the client. This struct should not be
 	// altered after it has been created.
+	// 返回client的Config
+	// 这个Config结构在创建之后不能改变了
 	Config() *Config
 
 	// Controller returns the cluster controller broker. It will return a
 	// locally cached value if it's available. You can call RefreshController
 	// to update the cached value. Requires Kafka 0.10 or higher.
+	// 返回集群 controller broker
+	// 如果本地缓存的value是可用的，则返回本地缓存的这个
+	// 可以调用 RefreshController 以更新缓存的value
+	// 这个需要Kafka 0.10或者更高
 	Controller() (*Broker, error)
 
 	// RefreshController retrieves the cluster controller from fresh metadata
@@ -28,6 +44,7 @@ type Client interface {
 	RefreshController() (*Broker, error)
 
 	// Brokers returns the current set of active brokers as retrieved from cluster metadata.
+	// 返回当前
 	Brokers() []*Broker
 
 	// Broker returns the active Broker if available for the broker ID.
@@ -84,18 +101,26 @@ type Client interface {
 
 	// RefreshCoordinator retrieves the coordinator for a consumer group and stores it
 	// in local cache. This function only works on Kafka 0.8.2 and higher.
+	// 为一个消费者组 获取 协调者信息
+	// 并存在本地cache中
+	// 这个函数仅仅给 kafka 0.8.2以及更高的版本才能生效
 	RefreshCoordinator(consumerGroup string) error
 
 	// InitProducerID retrieves information required for Idempotent Producer
+	// 获取幂等性生产所必须要的信息
 	InitProducerID() (*InitProducerIDResponse, error)
 
 	// Close shuts down all broker connections managed by this client. It is required
 	// to call this function before a client object passes out of scope, as it will
 	// otherwise leak memory. You must close any Producers or Consumers using a client
 	// before you close the client.
+	// 关掉此client中管理的所有broker连接
+	// 在传递这个对象出这个作用域之前需要被调用，否则会被泄露。
+	// 必须在关闭这个client之前 关闭掉任何使用这个client的 Producers 或者 Consumers
 	Close() error
 
 	// Closed returns true if the client has already had Close called on it
+	//  如果client已经执行过Close()则返回ture
 	Closed() bool
 }
 
@@ -138,6 +163,8 @@ type client struct {
 // NewClient creates a new Client. It connects to one of the given broker addresses
 // and uses that broker to automatically fetch metadata on the rest of the kafka cluster. If metadata cannot
 // be retrieved from any of the given broker addresses, the client is not created.
+// 其实参数跟 AsyncProducer的是完全相同的
+//  就是创建出一个新的client实例
 func NewClient(addrs []string, conf *Config) (Client, error) {
 	DebugLogger.Println("Initializing new client")
 
@@ -1113,12 +1140,15 @@ func (client *client) getConsumerMetadata(consumerGroup string, attemptsRemainin
 // through unchanged). This is for use in larger structs
 // where it is undesirable to close the client that was
 // passed in by the caller.
+// 就是嵌入一个 Client，然后禁用掉Close方法。
+// 这个主要在更大的结构体中，但是这个结构体不能关闭这个由调用者传入的client
 type nopCloserClient struct {
 	Client
 }
 
 // Close intercepts and purposely does not call the underlying
 // client's Close() method.
+// 无非就是 拦截 并不调用 底层的Close方法
 func (ncc *nopCloserClient) Close() error {
 	return nil
 }

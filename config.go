@@ -163,6 +163,7 @@ type Config struct {
 	Producer struct {
 		// The maximum permitted size of a message (defaults to 1000000). Should be
 		// set equal to or smaller than the broker's `message.max.bytes`.
+		// 100W 字节的最大单条限制 这个参数需要小于或者等于 broker端的 message.max.bytes
 		MaxMessageBytes int
 		// The level of acknowledgement reliability needed from the broker (defaults
 		// to WaitForLocal). Equivalent to the `request.required.acks` setting of the
@@ -187,6 +188,7 @@ type Config struct {
 		Partitioner PartitionerConstructor
 		// If enabled, the producer will ensure that exactly one copy of each message is
 		// written.
+		// 如果启用了， 生产者 会保证 只会严格地写入每条消息一次。
 		Idempotent bool
 
 		// Return specifies what channels will be populated. If they are set to true,
@@ -197,10 +199,12 @@ type Config struct {
 		Return struct {
 			// If enabled, successfully delivered messages will be returned on the
 			// Successes channel (default disabled).
+			// 如果启用了 成功投递的消息会被通过 Successes channel返回。默认是禁用的
 			Successes bool
 
 			// If enabled, messages that failed to deliver will be returned on the
 			// Errors channel, including error (default enabled).
+			// 如果启用了， 投递失败的消息会被从 Errors 通道返回 默认是启用的
 			Errors bool
 		}
 
@@ -431,6 +435,9 @@ type Config struct {
 	// permits the producer and consumer to continue processing some messages
 	// in the background while user code is working, greatly improving throughput.
 	// Defaults to 256.
+	// 缓冲到内部以及外部 channels的events数量
+	// 这个允许 Producer 和 consumer 当用户代码工作的时候，在后持续处理一些消息，极大改善吞吐，默认值为256。
+	// 内部所有的chan大小都是通过这个参数指定的 没有更加细分的大小参数了
 	ChannelBufferSize int
 	// ApiVersionsRequest determines whether Sarama should send an
 	// ApiVersionsRequest message to each broker as part of its initial

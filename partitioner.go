@@ -10,8 +10,12 @@ import (
 // Partitioner is anything that, given a Kafka message and a number of partitions indexed [0...numPartitions-1],
 // decides to which partition to send the message. RandomPartitioner, RoundRobinPartitioner and HashPartitioner are provided
 // as simple default implementations.
+// 给定一个 Kafka消息 以及一个 partition的数量
+// 这个Partitioner 要决定出哪个分区来发送这个消息
+// 提供了  随机 RR Hash
 type Partitioner interface {
 	// Partition takes a message and partition count and chooses a partition
+	// 消息参数 以及  分区数  并选择一个分区
 	Partition(message *ProducerMessage, numPartitions int32) (int32, error)
 
 	// RequiresConsistency indicates to the user of the partitioner whether the

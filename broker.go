@@ -19,7 +19,10 @@ import (
 )
 
 // Broker represents a single Kafka broker connection. All operations on this object are entirely concurrency-safe.
+// 表示1个kafka broker连接
+// 这个对象上的所有操作都是完全并发安全的
 type Broker struct {
+	//  这个配置对象其实就还是创建 Producer时传入的对象
 	conf *Config
 	rack *string
 

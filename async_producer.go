@@ -18,12 +18,20 @@ import (
 // producer will deadlock. You must call Close() or AsyncClose() on a producer to avoid
 // leaks and message lost: it will not be garbage-collected automatically when it passes
 // out of scope and buffered messages may not be flushed.
+// 使用一个非阻塞的API来发送kafka消息。
+// 将消息为提供的topic-paritition以路由到正确的broker，合适的时候刷新metadata，并为错误解析响应。
+// 你必须从Errors channel读取，否则producer就会死锁。
+// 你必须在producer实例上调用Close或者AsyncClose() 以避免泄露以及消息丢失。
+//   这些东西当传出了作用域之后是不会被自动GC掉的，并且缓冲的消息也不会被刷走。
 type AsyncProducer interface {
 
 	// AsyncClose triggers a shutdown of the producer. The shutdown has completed
 	// when both the Errors and Successes channels have been closed. When calling
 	// AsyncClose, you *must* continue to read from those channels in order to
 	// drain the results of any messages in flight.
+	// 触发 producer实例的 shutdown。
+	// 当Errors和Success channels都已经被关闭的时候， shutdown结束。
+	// 当调用 AsyncClose 你必须持续从哪些channels中读取，为了排干任何 in flight中的消息的结果。
 	AsyncClose()
 
 	// Close shuts down the producer and waits for any buffered messages to be
@@ -31,29 +39,42 @@ type AsyncProducer interface {
 	// scope, as it may otherwise leak memory. You must call this before process
 	// shutting down, or you may lose messages. You must call this before calling
 	// Close on the underlying client.
+	// Close shut down producer 并等待任何消息被flushed掉。
+	//
 	Close() error
 
 	// Input is the input channel for the user to write messages to that they
 	// wish to send.
+	// Input是输入channel  用于给用户写入消息的
 	Input() chan<- *ProducerMessage
 
 	// Successes is the success output channel back to the user when Return.Successes is
 	// enabled. If Return.Successes is true, you MUST read from this channel or the
 	// Producer will deadlock. It is suggested that you send and read messages
 	// together in a single select statement.
+	// 当Return.Successes启用的时候， 这个就是成功的输出channel。
+	// 如果 Return.Successes 配置为true，你必须从这个channel中读取  否则producer就会死锁
+	// 建议你在单条select语句中发送和读取消息。
 	Successes() <-chan *ProducerMessage
 
 	// Errors is the error output channel back to the user. You MUST read from this
 	// channel or the Producer will deadlock when the channel is full. Alternatively,
 	// you can set Producer.Return.Errors in your config to false, which prevents
 	// errors to be returned.
+	// 就是返回给用户的 error 输出channel。
+	// 你必须从这个channel读取，否则Producer当这个channel满了就死锁了。
+	// 除非你设置Reture.Errors为false，这样会阻止错误返回。
 	Errors() <-chan *ProducerError
 }
 
 // transactionManager keeps the state necessary to ensure idempotent production
+// 保存为了确保幂等性生产所必须的state
+// 事务管理器
 type transactionManager struct {
-	producerID      int64
-	producerEpoch   int16
+	producerID int64
+	// 特别 注意这个 producer epoch
+	producerEpoch int16
+	// 无非就是用 producer-partititon 作为key来管理每个的这种序列号， 不过这个就是一个int32类型的数而已 回绕或者溢出呢
 	sequenceNumbers map[string]int32
 	mutex           sync.Mutex
 }
@@ -63,7 +84,9 @@ const (
 	noProducerEpoch = -1
 )
 
+// 无非就是通过 transaction manager 来专门管理这种 序列号的东西
 func (t *transactionManager) getAndIncrementSequenceNumber(topic string, partition int32) (int32, int16) {
+	// 管理的维度就是 topic-partition
 	key := fmt.Sprintf("%s-%d", topic, partition)
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -109,9 +132,12 @@ func newTransactionManager(conf *Config, client Client) (*transactionManager, er
 	return txnmgr, nil
 }
 
+// AsyncProducer的真正实现类
 type asyncProducer struct {
+	// 一个实例无非内部肯定有一个client用来处理真正的通信过程
 	client Client
-	conf   *Config
+	// 就是应用层的一个 配置对象
+	conf *Config
 
 	errors                    chan *ProducerError
 	input, successes, retries chan *ProducerMessage
@@ -126,6 +152,7 @@ type asyncProducer struct {
 
 // NewAsyncProducer creates a new AsyncProducer using the given broker addresses and configuration.
 func NewAsyncProducer(addrs []string, conf *Config) (AsyncProducer, error) {
+	// 无非就是两步  就是先创建出一个 client  client无非就是底层的所有连接的管理而已
 	client, err := NewClient(addrs, conf)
 	if err != nil {
 		return nil, err
@@ -135,6 +162,7 @@ func NewAsyncProducer(addrs []string, conf *Config) (AsyncProducer, error) {
 
 // NewAsyncProducerFromClient creates a new Producer using the given client. It is still
 // necessary to call Close() on the underlying client when shutting down this producer.
+// 是否 可以 其实创建的 所有 producer 都共用这个 client对象 然后上层的AsyncProducer自己来处理自己的事情呢
 func NewAsyncProducerFromClient(client Client) (AsyncProducer, error) {
 	// For clients passed in by the client, ensure we don't
 	// call Close() on it.
@@ -153,6 +181,7 @@ func newAsyncProducer(client Client) (AsyncProducer, error) {
 		return nil, err
 	}
 
+	// 无非就是一个 这种 async Producer实例而已 同时启动了 两个协程而已
 	p := &asyncProducer{
 		client:     client,
 		conf:       client.Config(),
@@ -166,6 +195,7 @@ func newAsyncProducer(client Client) (AsyncProducer, error) {
 	}
 
 	// launch our singleton dispatchers
+	// 也就是每个 Producer内部都有这种协程专门来处理 输入 并传给底层的client 实例的
 	go withRecover(p.dispatcher)
 	go withRecover(p.retryHandler)
 
@@ -208,6 +238,9 @@ type ProducerMessage struct {
 	Offset int64
 	// Partition is the partition that the message was sent to. This is only
 	// guaranteed to be defined if the message was successfully delivered.
+	// 在TopicProducer中为这个消息 分配分区，并且写入到这个字段中``
+	// 就是这条消息要发送到的Partition
+	// 仅当消息被成功投递的时候，才会被定义，否则一定是没有定义的
 	Partition int32
 	// Timestamp can vary in behavior depending on broker configuration, being
 	// in either one of the CreateTime or LogAppendTime modes (default CreateTime),
@@ -222,12 +255,14 @@ type ProducerMessage struct {
 	// successfully delivered and RequiredAcks is not NoResponse.
 	Timestamp time.Time
 
+	// 这个应该是消息当前的重试次数记录？
 	retries        int
 	flags          flagSet
 	expectation    chan *ProducerError
 	sequenceNumber int32
 	producerEpoch  int16
-	hasSequence    bool
+	// 消息是否有序列号？
+	hasSequence bool
 }
 
 const producerMessageOverhead = 26 // the metadata overhead of CRC, flags, etc.
@@ -292,6 +327,7 @@ func (p *asyncProducer) Successes() <-chan *ProducerMessage {
 }
 
 func (p *asyncProducer) Input() chan<- *ProducerMessage {
+	// 这个就是 返回用来写入的chan的
 	return p.input
 }
 
@@ -330,11 +366,14 @@ func (p *asyncProducer) dispatcher() {
 	handlers := make(map[string]chan<- *ProducerMessage)
 	shuttingDown := false
 
+	// 无非就是专门有一个协程 来从这里读取 要发送的消息
 	for msg := range p.input {
 		if msg == nil {
 			Logger.Println("Something tried to send a nil message, it was ignored.")
 			continue
 		}
+
+		// 重点就是看这个传入进来的每条消息是如何处理的呢
 
 		if msg.flags&shutdown != 0 {
 			shuttingDown = true
@@ -366,17 +405,24 @@ func (p *asyncProducer) dispatcher() {
 			p.returnError(msg, ConfigurationError("Producing headers requires Kafka at least v0.11"))
 			continue
 		}
+		// 无非就是推断出版本，然后用这个来判断是否 消息符合这个最大消息的限制
 		if msg.byteSize(version) > p.conf.Producer.MaxMessageBytes {
 			p.returnError(msg, ErrMessageSizeTooLarge)
 			continue
 		}
 
+		// 无非就是按照topic维度将消息通过chan发送给到  topicProducer去
+
 		handler := handlers[msg.Topic]
 		if handler == nil {
+			// 无非就是内部有给每个 topic 都创建出了一个这种chan实例
+			// 所以消息里面的 topic就是干这个用的 无非 就是每个topic都是隔离开的了
+			// 也就只有这 topic的第一条消息会创建出 这个topic而已
 			handler = p.newTopicProducer(msg.Topic)
 			handlers[msg.Topic] = handler
 		}
 
+		// 最后这条消息就是 发送到这个 chan 中去了呢
 		handler <- msg
 	}
 
@@ -388,32 +434,49 @@ func (p *asyncProducer) dispatcher() {
 // one per topic
 // partitions messages, then dispatches them by partition
 type topicProducer struct {
+	// 无非就是谁创建了 topicProducer 当然是 asyncProducer
+	// 所以用parent 指向创建这个 topicProducer的asyncProducer
 	parent *asyncProducer
 	topic  string
 	input  <-chan *ProducerMessage
 
-	breaker     *breaker.Breaker
-	handlers    map[int32]chan<- *ProducerMessage
+	// 好像很多东西都会有这样一个断路器的东西
+	breaker *breaker.Breaker
+	//  都不直接管理 下面的 Producer实例 而是就维护一个chan的map就行
+	handlers map[int32]chan<- *ProducerMessage
+	// 分区器 实例 无非就是用来做分区而已
 	partitioner Partitioner
 }
 
+// 无非就是有几层的这种  这里为每个 topic都有创建一个  chan ProducerMessage
+// 也就是每个topic都有一个 topic producer 实例
 func (p *asyncProducer) newTopicProducer(topic string) chan<- *ProducerMessage {
+	// 所以这个所谓 topic producer 实际上就是一条chan而已
+	// 实际上 这个配置就是  topic producer的 chan大小
 	input := make(chan *ProducerMessage, p.conf.ChannelBufferSize)
+	// 无非就是创建这个对象， 然后返回一条chan而已
 	tp := &topicProducer{
-		parent:      p,
-		topic:       topic,
+		parent: p,
+		topic:  topic,
+		// 消息的传入 从 asyncProducer 传入到这个 topicProducer的这种chan中
 		input:       input,
 		breaker:     breaker.New(3, 1, 10*time.Second),
 		handlers:    make(map[int32]chan<- *ProducerMessage),
 		partitioner: p.conf.Producer.Partitioner(topic),
 	}
+	// 无非就是启动的时候 就会创建出一个携程专门来处理从 asyncProducer -> topicProducer ->
 	go withRecover(tp.dispatch)
+	// 这条chan实际上就是会让
 	return input
 }
 
+// 无非就是 分层还有一个  topic producer
 func (tp *topicProducer) dispatch() {
 	for msg := range tp.input {
+		// 如果是第一次发送消息
 		if msg.retries == 0 {
+			// 将这条消息 分区到 Partition，并且更新此消息的 Partition字段
+			// topic 维度无非就 给它决定了partition 然后将这个东西给送到底层的 partitionProducer实例去而已
 			if err := tp.partitionMessage(msg); err != nil {
 				tp.parent.returnError(msg, err)
 				continue
@@ -422,6 +485,8 @@ func (tp *topicProducer) dispatch() {
 
 		handler := tp.handlers[msg.Partition]
 		if handler == nil {
+			// 特别注意这里还是用 parent  也就是 asyncProducer 进行管理，为什么呢
+			// 无非就还是想让他们都知道自己的父亲是谁呢？？
 			handler = tp.parent.newPartitionProducer(msg.Topic, msg.Partition)
 			tp.handlers[msg.Partition] = handler
 		}
@@ -437,6 +502,7 @@ func (tp *topicProducer) dispatch() {
 func (tp *topicProducer) partitionMessage(msg *ProducerMessage) error {
 	var partitions []int32
 
+	// 后续重点研究这里做了什么不得了的事情 拿到了分区列表
 	err := tp.breaker.Run(func() (err error) {
 		requiresConsistency := false
 		if ep, ok := tp.partitioner.(DynamicConsistencyPartitioner); ok {
@@ -457,29 +523,38 @@ func (tp *topicProducer) partitionMessage(msg *ProducerMessage) error {
 	}
 
 	numPartitions := int32(len(partitions))
-
+	// 没有分区表  那就说明leader不可用
 	if numPartitions == 0 {
 		return ErrLeaderNotAvailable
 	}
 
+	// 无非就是为这个消息进行分区而已
 	choice, err := tp.partitioner.Partition(msg, numPartitions)
 
 	if err != nil {
 		return err
 	} else if choice < 0 || choice >= numPartitions {
+		// 分区出来的是一个无效的分区ID
 		return ErrInvalidPartition
 	}
 
+	// 最后将这个分区写入到  Partition成员
 	msg.Partition = partitions[choice]
 
 	return nil
 }
 
 // one per partition per topic
+// 1个 <topic, partition> 1个实例
 // dispatches messages to the appropriate broker
+// 无非就是将消息分发到 合适的 broker去
 // also responsible for maintaining message order during retries
+// 也会负责维护在重试的时候的消息顺序
 type partitionProducer struct {
-	parent    *asyncProducer
+	// 每个层级的 parent 都是直接到这个 asyncProducer
+	// 必须的 很多东西都还是需要通过client去通过底层访问到对应的broker那边去
+	parent *asyncProducer
+	// 属于哪个 <topic, partition>
 	topic     string
 	partition int32
 	input     <-chan *ProducerMessage
@@ -501,7 +576,9 @@ type partitionRetryState struct {
 	expectChaser bool
 }
 
+// 还有一个分区的 partitionProducer
 func (p *asyncProducer) newPartitionProducer(topic string, partition int32) chan<- *ProducerMessage {
+	// 也是这种模式并不直接管理 这个 partitionProducer 而是只知道有这么个chan而已
 	input := make(chan *ProducerMessage, p.conf.ChannelBufferSize)
 	pp := &partitionProducer{
 		parent:    p,
@@ -598,13 +675,19 @@ func (pp *partitionProducer) dispatch() {
 
 		// Now that we know we have a broker to actually try and send this message to, generate the sequence
 		// number for it.
+		// 现在我们知道  我们有一个broker 可以实际试试并实际发这个消息过去。 可以为他生成这个序列号了。
 		// All messages being retried (sent or not) have already had their retry count updated
+		// 所有被重试的消息不论是否发送或者不发送  都已经有他们自己的重试计数器更新
 		// Also, ignore "special" syn/fin messages used to sync the brokerProducer and the topicProducer.
+		// 同时忽略掉 特殊的 syn/fin 消息，这种特殊消息用于同步 brokerProducer 和 topicProducer
 		if pp.parent.conf.Producer.Idempotent && msg.retries == 0 && msg.flags == 0 {
+			// 幂等且 非重试 且非特殊位(syn/fin消息使用的标志位)
+			// 无非就是 <topic, partition> 维度下会有一个自增ID 来作为序列号的``
 			msg.sequenceNumber, msg.producerEpoch = pp.parent.txnmgr.getAndIncrementSequenceNumber(msg.Topic, msg.Partition)
 			msg.hasSequence = true
 		}
 
+		// 无非就是partition producer 最总将这个消息发送给  broker producer了
 		pp.brokerProducer.input <- msg
 	}
 }
@@ -1152,9 +1235,11 @@ func (p *asyncProducer) bumpIdempotentProducerEpoch() {
 	}
 }
 
+// 这个函数实际上行 就是 将原封不动的消息 给通过chan 封装成 ProducerError类型通过errors chan给发回去呢
 func (p *asyncProducer) returnError(msg *ProducerMessage, err error) {
 	// We need to reset the producer ID epoch if we set a sequence number on it, because the broker
 	// will never see a message with this number, so we can never continue the sequence.
+	// 如果消息有 序列号
 	if msg.hasSequence {
 		Logger.Printf("producer/txnmanager rolling over epoch due to publish failure on %s/%d", msg.Topic, msg.Partition)
 		p.bumpIdempotentProducerEpoch()
@@ -1163,6 +1248,7 @@ func (p *asyncProducer) returnError(msg *ProducerMessage, err error) {
 	msg.clear()
 	pErr := &ProducerError{Msg: msg, Err: err}
 	if p.conf.Producer.Return.Errors {
+		// 就看是否配置了 返回错误呢
 		p.errors <- pErr
 	} else {
 		Logger.Println(pErr)
